@@ -131,3 +131,6 @@ ENV/
 
 # mypy
 .mypy_cache/
+
+# images
+148/

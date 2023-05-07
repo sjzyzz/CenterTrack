@@ -15,11 +15,11 @@ class opts(object):
             'task',
             default='',
             help='ctdet | ddd | multi_pose '
-            '| tracking or combined with ,'
+            '| tracking | classify | classify | new_try or combined with ,'
         )
         self.parser.add_argument(
             '--dataset',
-            default='coco',
+            default='thu',
             help='see lib/dataset/dataset_facotry for ' + 'available datasets'
         )
         self.parser.add_argument(
@@ -390,9 +390,15 @@ class opts(object):
         self.parser.add_argument('--velocity', action='store_true')
         self.parser.add_argument('--velocity_weight', type=float, default=1)
 
+        # thu dataset
+        self.parser.add_argument('--class_weight', type=float, default=1)
+
         # custom dataset
         self.parser.add_argument('--custom_dataset_img_path', default='')
         self.parser.add_argument('--custom_dataset_ann_path', default='')
+
+        # 对此文件夹下的文件做测试
+        self.parser.add_argument('--test_folder', type=str, help='path to the test folder')
 
     def parse(self, args=''):
         if args == '':
@@ -505,6 +511,12 @@ class opts(object):
                 }
             )
 
+        if 'classify' in opt.task:
+            opt.heads.update({'class': 3})
+
+        # if 'new_try' in opt.task:
+        #     opt.heads.update({'vote': dataset.num_joints * 3})
+
         if opt.ltrb:
             opt.heads.update({'ltrb': 4})
         if opt.ltrb_amodal:
@@ -529,7 +541,8 @@ class opts(object):
             'tracking': opt.tracking_weight,
             'ltrb_amodal': opt.ltrb_amodal_weight,
             'nuscenes_att': opt.nuscenes_att_weight,
-            'velocity': opt.velocity_weight
+            'velocity': opt.velocity_weight,
+            'class': opt.class_weight,
         }
         opt.weights = {
             head: weight_dict[head]

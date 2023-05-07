@@ -8,4 +8,4 @@ if __name__ == '__main__':
     opt = opts().update_dataset_info_and_set_heads(opt, Dataset)
     split = 'val' if not opt.trainval else 'test'
     dataset = Dataset(opt, split)
-    dataset.run_eval_only(opt.save_dir)
+    dataset.run_eval_only(opt.test_folder)

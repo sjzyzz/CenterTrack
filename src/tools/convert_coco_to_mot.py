@@ -51,15 +51,17 @@ if __name__ == '__main__':
                         tracking_id = item['tracking_id']
                         bbox = item['bbox']
                         bbox = [bbox[0], bbox[1], bbox[2], bbox[3]]
-                        tracks[tracking_id].append([frame_id] + bbox)
+                        tracks[tracking_id].append(
+                            [frame_id] + bbox + [item['category_id']]
+                        )
                     rename_track_id = 0
                 for track_id in sorted(tracks):
                     # TODO 最后三位需要考虑
                     rename_track_id += 1
                     for t in tracks[track_id]:
                         f.write(
-                            '{},{},{:d},{:d},{:d},{:d},1,1,1\n'.format(
+                            '{},{},{:d},{:d},{:d},{:d},1,{:d},1\n'.format(
                                 t[0], rename_track_id, int(t[1]), int(t[2]), int(t[3]),
-                                int(t[4])
+                                int(t[4]), int(t[5])
                             )
                         )

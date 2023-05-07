@@ -27,6 +27,8 @@ class GenericLoss(torch.nn.Module):
             self.crit_rot = BinRotLoss()
         if 'nuscenes_att' in opt.heads:
             self.crit_nuscenes_att = WeightedBCELoss()
+        if 'class' in opt.heads:
+            self.class_crit = WeightedBCELoss()
         self.opt = opt
 
     def _sigmoid_output(self, output):
@@ -86,6 +88,11 @@ class GenericLoss(torch.nn.Module):
                 losses['nuscenes_att'] += self.crit_nuscenes_att(
                     output['nuscenes_att'], batch['nuscenes_att_mask'], batch['ind'],
                     batch['nuscenes_att']
+                ) / opt.num_stacks
+
+            if 'class' in output:
+                losses['class'] += self.class_crit(
+                    output['class'], batch['class_mask'], batch['ind'], batch['class']
                 ) / opt.num_stacks
 
         losses['tot'] = 0
@@ -201,7 +208,7 @@ class Trainer(object):
     def _get_losses(self, opt):
         loss_order = ['hm', 'wh', 'reg', 'ltrb', 'hps', 'hm_hp', \
           'hp_offset', 'dep', 'dim', 'rot', 'amodel_offset', \
-          'ltrb_amodal', 'tracking', 'nuscenes_att', 'velocity']
+          'ltrb_amodal', 'tracking', 'nuscenes_att', 'velocity', 'class']
         loss_states = ['tot'] + [k for k in loss_order if k in opt.heads]
         loss = GenericLoss(opt)
         return loss_states, loss

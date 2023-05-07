@@ -149,7 +149,7 @@ class GenericDataset(data.Dataset):
         num_objs = min(len(anns), self.max_objs)
         for k in range(num_objs):
             ann = anns[k]
-            # cls_id = int(self.cat_ids[ann['category_id']])
+            real_cls_id = int(ann['category_id'])
             cls_id = 1
             if cls_id > self.opt.num_classes or cls_id <= -999:
                 continue
@@ -159,10 +159,27 @@ class GenericDataset(data.Dataset):
             if cls_id <= 0 or ('iscrowd' in ann and ann['iscrowd'] > 0):
                 self._mask_ignore_or_crowd(ret, cls_id, bbox)
                 continue
-            self._add_instance(
-                ret, gt_det, k, cls_id, bbox, bbox_amodal, ann, trans_output, aug_s, calib,
-                pre_cts, track_ids
-            )
+            if 'classify' in self.opt.task:
+                self._add_instance_with_class(
+                    ret,
+                    gt_det,
+                    k,
+                    cls_id,
+                    bbox,
+                    bbox_amodal,
+                    ann,
+                    trans_output,
+                    aug_s,
+                    calib,
+                    pre_cts,
+                    track_ids,
+                    real_cls_id,
+                )
+            else:
+                self._add_instance(
+                    ret, gt_det, k, cls_id, bbox, bbox_amodal, ann, trans_output, aug_s,
+                    calib, pre_cts, track_ids
+                )
 
         if self.opt.debug > 0:
             gt_det = self._format_gt_det(gt_det)
@@ -372,7 +389,8 @@ class GenericDataset(data.Dataset):
             'hps': self.num_joints * 2,
             'dep': 1,
             'dim': 3,
-            'amodel_offset': 2
+            'amodel_offset': 2,
+            'class': 3,
         }
 
         for head in regression_head_dims:
@@ -535,6 +553,127 @@ class GenericDataset(data.Dataset):
                 ret['nuscenes_att'][k][att] = 1
                 ret['nuscenes_att_mask'][k][self.nuscenes_att_range[att]] = 1
             gt_det['nuscenes_att'].append(ret['nuscenes_att'][k])
+
+        if 'class' in self.opt.heads:
+            category_id = int(ann['category_id'])
+            ret['class'][k][category_id] = 1
+            ret['class_mask'][k] = 1
+            gt_det['class'].append(ret['class'][k])
+
+        if 'velocity' in self.opt.heads:
+            if ('velocity' in ann) and min(ann['velocity']) > -1000:
+                ret['velocity'][k] = np.array(ann['velocity'], np.float32)[:3]
+                ret['velocity_mask'][k] = 1
+            gt_det['velocity'].append(ret['velocity'][k])
+
+        if 'hps' in self.opt.heads:
+            self._add_hps(ret, k, ann, gt_det, trans_output, ct_int, bbox, h, w)
+
+        if 'rot' in self.opt.heads:
+            self._add_rot(ret, ann, k, gt_det)
+
+        if 'dep' in self.opt.heads:
+            if 'depth' in ann:
+                ret['dep_mask'][k] = 1
+                ret['dep'][k] = ann['depth'] * aug_s
+                gt_det['dep'].append(ret['dep'][k])
+            else:
+                gt_det['dep'].append(2)
+
+        if 'dim' in self.opt.heads:
+            if 'dim' in ann:
+                ret['dim_mask'][k] = 1
+                ret['dim'][k] = ann['dim']
+                gt_det['dim'].append(ret['dim'][k])
+            else:
+                gt_det['dim'].append([1, 1, 1])
+
+        if 'amodel_offset' in self.opt.heads:
+            if 'amodel_center' in ann:
+                amodel_center = affine_transform(ann['amodel_center'], trans_output)
+                ret['amodel_offset_mask'][k] = 1
+                ret['amodel_offset'][k] = amodel_center - ct_int
+                gt_det['amodel_offset'].append(ret['amodel_offset'][k])
+            else:
+                gt_det['amodel_offset'].append([0, 0])
+
+    def _add_instance_with_class(
+        self,
+        ret,
+        gt_det,
+        k,
+        cls_id,
+        bbox,
+        bbox_amodal,
+        ann,
+        trans_output,
+        aug_s,
+        calib,
+        pre_cts=None,
+        track_ids=None,
+        real_cls_id=None,
+    ):
+        h, w = bbox[3] - bbox[1], bbox[2] - bbox[0]
+        if h <= 0 or w <= 0:
+            return
+        radius = gaussian_radius((math.ceil(h), math.ceil(w)))
+        radius = max(0, int(radius))
+        ct = np.array([(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2], dtype=np.float32)
+        ct_int = ct.astype(np.int32)
+        ret['cat'][k] = cls_id - 1
+        ret['mask'][k] = 1
+        if 'wh' in ret:
+            ret['wh'][k] = 1. * w, 1. * h
+            ret['wh_mask'][k] = 1
+        ret['ind'][k] = ct_int[1] * self.opt.output_w + ct_int[0]
+        ret['reg'][k] = ct - ct_int
+        ret['reg_mask'][k] = 1
+        draw_umich_gaussian(ret['hm'][cls_id - 1], ct_int, radius)
+
+        gt_det['bboxes'].append(
+            np.array(
+                [ct[0] - w / 2, ct[1] - h / 2, ct[0] + w / 2, ct[1] + h / 2],
+                dtype=np.float32
+            )
+        )
+        gt_det['scores'].append(1)
+        gt_det['clses'].append(cls_id - 1)
+        gt_det['class'].append(real_cls_id)
+        gt_det['cts'].append(ct)
+
+        if 'tracking' in self.opt.heads:
+            if ann['track_id'] in track_ids:
+                pre_ct = pre_cts[track_ids.index(ann['track_id'])]
+                ret['tracking_mask'][k] = 1
+                ret['tracking'][k] = pre_ct - ct_int
+                gt_det['tracking'].append(ret['tracking'][k])
+            else:
+                gt_det['tracking'].append(np.zeros(2, np.float32))
+
+        if 'ltrb' in self.opt.heads:
+            ret['ltrb'][k] = bbox[0] - ct_int[0], bbox[1] - ct_int[1], \
+              bbox[2] - ct_int[0], bbox[3] - ct_int[1]
+            ret['ltrb_mask'][k] = 1
+
+        if 'ltrb_amodal' in self.opt.heads:
+            ret['ltrb_amodal'][k] = \
+              bbox_amodal[0] - ct_int[0], bbox_amodal[1] - ct_int[1], \
+              bbox_amodal[2] - ct_int[0], bbox_amodal[3] - ct_int[1]
+            ret['ltrb_amodal_mask'][k] = 1
+            gt_det['ltrb_amodal'].append(bbox_amodal)
+
+        if 'nuscenes_att' in self.opt.heads:
+            if ('attributes' in ann) and ann['attributes'] > 0:
+                att = int(ann['attributes'] - 1)
+                ret['nuscenes_att'][k][att] = 1
+                ret['nuscenes_att_mask'][k][self.nuscenes_att_range[att]] = 1
+            gt_det['nuscenes_att'].append(ret['nuscenes_att'][k])
+
+        if 'class' in self.opt.heads:
+            category_id = int(ann['category_id'])
+            ret['class'][k][category_id] = 1
+            ret['class_mask'][k] = 1
+            gt_det['class'].append(ret['class'][k])
 
         if 'velocity' in self.opt.heads:
             if ('velocity' in ann) and min(ann['velocity']) > -1000:

@@ -95,9 +95,7 @@ class THU(GenericDataset):
                 # newest format
                 for j in range(len(all_bboxes[image_id])):
                     item = all_bboxes[image_id][j]
-                    if item['class'] != 1:
-                        continue
-                    category_id = 1
+                    # category_embedding = np.array(item['class'], np.float32)
                     keypoints = np.concatenate(
                         [
                             np.array(item['hps'], dtype=np.float32).reshape(-1, 2),
@@ -107,7 +105,7 @@ class THU(GenericDataset):
                     ).reshape(51).tolist()
                     detection = {
                         "image_id": int(image_id),
-                        "category_id": int(category_id),
+                        "category_id": int(item['class']),
                         "score": float("{:.2f}".format(item['score'])),
                         "keypoints": keypoints
                     }
@@ -142,9 +140,9 @@ class THU(GenericDataset):
         if 'multi_pose' in self.opt.task:
             self.save_pose_results(results, save_dir)
             coco_dets = self.coco.loadRes('{}/results_pose.json'.format(save_dir))
-            if self.opt.single_class_test:
-                for ann in self.coco.dataset['annotations']:
-                    ann['category_id'] = 1
+            # if self.opt.single_class_test:
+            #     for ann in self.coco.dataset['annotations']:
+            #         ann['category_id'] = 1
             coco_eval = COCOeval(self.coco, coco_dets, "keypoints")
             coco_eval.evaluate()
             coco_eval.accumulate()
@@ -170,6 +168,8 @@ class THU(GenericDataset):
         # self.save_pose_results(results, save_dir)
         coco_dets = self.coco.loadRes('{}/results_pose.json'.format(save_dir))
         if self.opt.single_class_test:
+            for k, v in coco_dets.anns.items():
+                v['category_id'] = 1
             for ann in self.coco.dataset['annotations']:
                 ann['category_id'] = 1
         coco_eval = COCOeval(self.coco, coco_dets, "keypoints")
